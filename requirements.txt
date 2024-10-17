@@ -1,0 +1,6 @@
+# requirements.txt
+numpy
+pandas
+scikit-learn
+matplotlib
+jupyter
