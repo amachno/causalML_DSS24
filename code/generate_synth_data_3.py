@@ -206,6 +206,7 @@ pd.concat([df_intervention1[['unit_price', 'sales']].mean(),
            axis=1).rename(columns={0: 'min', 1: 'average', 2: 'max'})
 # seams reasonable linear relationsheep between price and sales
 
+2+2 # test
 
 # draw counterfacutal samples
 if False:
