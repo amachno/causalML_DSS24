@@ -1,10 +1,18 @@
 import numpy as np
 import pandas as pd
+import re
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from sklearn.linear_model import LinearRegression
 
 # PATH_DATA = "C:/Users/lukasz.frydrych/OneDrive - Lingaro Sp. z o. o/Desktop\projects/202410_DSSummit/data"
+
+def return_regex_cols(df, rgx):
+    """returns list of columns"""
+    comp = re.compile(rgx)
+    cols = list(filter(comp.match, df.columns))
+    return cols
 
 def plot_sales_timeseries(df, store_id, product_id):
     # Filter the dataframe for the given store_id and product_id
@@ -128,7 +136,7 @@ def remove_sales_outliers_groupby(df, groupby_cols, sales_col='sales', threshold
     print(f"Removed {len(df) - len(df_filtered)} sales outliers")
     return df_filtered
 
-def summarize_and_rank(df, grp_cols):
+def summarize_and_rank(df, grp_cols, get_elast_coefs=False):
 
     df_summary = df.groupby(grp_cols).agg(
         avg_sales=('sales', 'mean'),
@@ -139,6 +147,32 @@ def summarize_and_rank(df, grp_cols):
     df_non_zero_sales = df[df['sales'] > 0].groupby(grp_cols).size().reset_index(name='non_zero_sales_count')
     df_summary = pd.merge(df_summary, df_non_zero_sales, on=grp_cols, how='left')
 
+    if get_elast_coefs:
+        coefficients = {}
+        n_skus = len(df['product_id'].unique())
+        for i, product_id in enumerate(df['product_id'].unique()):
+            if i % (n_skus // 10) == 0:
+                print(f"Processing {i}/{n_skus} SKUs ({(i / n_skus) * 100:.1f}%)")
+            subset = df[df['product_id'] == product_id]
+            if not subset.empty:
+                model = LinearRegression().fit(subset[['log_price', 'month', 'year', 'store_size', 'trend']], subset['log_sales'])
+                coefficients[product_id] = model.coef_[0]
+
+        df_coefs = pd.DataFrame(list(coefficients.items()), columns=['product_id', 'coefficient']).sort_values(by='coefficient', ascending=True)
+        df_coefs['coefficient'] = -df_coefs['coefficient']
+
+        df_summary = pd.merge(df_summary, df_coefs, on=grp_cols, how='left')
+        # Standardize all values in df_summary to have values between 0 and 1
+        scaler = MinMaxScaler()
+        df_summary[['avg_sales', 'std_sales', 'std_unit_price', 'non_zero_sales_count', 'coefficient']] = scaler.fit_transform(
+            df_summary[['avg_sales', 'std_sales', 'std_unit_price', 'non_zero_sales_count', 'coefficient']]
+        )
+        df_summary['ranking'] = df_summary['avg_sales'] * df_summary['std_sales'] * df_summary['std_unit_price'] * df_summary['non_zero_sales_count'] * df_summary['coefficient']
+        df_summary.sort_values(by=['ranking'], ascending=False, inplace=True)
+
+        print("Returning dataframe with coefficients")
+        return df_summary
+
     # Standardize all values in df_summary to have values between 0 and 1
     scaler = MinMaxScaler()
     df_summary[['avg_sales', 'std_sales', 'std_unit_price', 'non_zero_sales_count']] = scaler.fit_transform(
@@ -146,5 +180,6 @@ def summarize_and_rank(df, grp_cols):
     )
     df_summary['ranking'] = df_summary['avg_sales'] * df_summary['std_sales'] * df_summary['std_unit_price'] * df_summary['non_zero_sales_count']
     df_summary.sort_values(by=['ranking'], ascending=False, inplace=True)
-        
+    
+    print("Returning dataframe without coefficients")
     return df_summary
