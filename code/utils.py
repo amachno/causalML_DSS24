@@ -5,6 +5,12 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from sklearn.linear_model import LinearRegression
+import dowhy
+import optuna
+import lightgbm as lgb
+from sklearn.metrics import mean_absolute_percentage_error, mean_squared_error
+from sklearn.model_selection import cross_val_score
+from sklearn.ensemble import GradientBoostingRegressor
 
 # PATH_DATA = "C:/Users/lukasz.frydrych/OneDrive - Lingaro Sp. z o. o/Desktop\projects/202410_DSSummit/data"
 
@@ -183,3 +189,103 @@ def summarize_and_rank(df, grp_cols, get_elast_coefs=False):
     
     print("Returning dataframe without coefficients")
     return df_summary
+
+
+def generate_test_dataset(scm_data_gen, intervention_dict, df_test):
+    df_test_c = dowhy.gcm.whatif.interventional_samples(scm_data_gen, intervention_dict, df_test)
+    print(f"Average sales: {df_test_c['sales'].mean()} for price: {df_test_c['price'].mean()}")
+    df_test_c['log_price'] = np.log(df_test_c['price'] + 1)  # Adding 1 to avoid log(0)
+    df_test_c['log_sales'] = np.log(df_test_c['sales'] + 1)  # Adding 1 to avoid log(0)
+    plt.scatter(df_test_c['price'], df_test_c['sales'], color='blue')
+    plt.show()
+    return df_test_c
+
+def change_store_type_type(df):
+    df_c = df.copy()
+    df_c['store_type'] = df_c['store_type'].astype('category').cat.codes + 1
+    df_c['store_type'] = df_c['store_type'].astype(int)
+    return df_c
+
+def tune_lgbm(df_train, x_cols, y_col, n_trials=15):
+    def objective(trial):
+        param = {
+            'objective': 'regression',
+            'metric': 'rmse',
+            'verbosity': -1,
+            'lambda_l1': trial.suggest_loguniform('lambda_l1', 1e-8, 10.0),
+            'num_leaves': trial.suggest_int('num_leaves', 2, 100),
+            'feature_fraction': trial.suggest_uniform('feature_fraction', 0.4, 1.0),
+            'bagging_fraction': trial.suggest_uniform('bagging_fraction', 0.4, 1.0),
+            'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 50),
+            'num_boost_round': trial.suggest_int('num_boost_round', 50, 500),
+            'learning_rate': trial.suggest_loguniform('learning_rate', 1e-4, 1e-1),
+            'max_depth': trial.suggest_int('max_depth', 2, 10),
+        }
+        
+        lgb_train = lgb.Dataset(df_train[x_cols], df_train[y_col])
+        cv_results = lgb.cv(param, lgb_train, nfold=3, metrics='rmse', seed=42, stratified=False)
+        
+        return np.mean(cv_results['valid rmse-mean'])
+    
+    study = optuna.create_study(direction='minimize')
+    study.optimize(objective, n_trials=n_trials)
+    
+    best_params = study.best_params
+    print(f"Best parameters: {best_params}")
+    return best_params
+
+
+def calculate_grouped_metrics(df):
+    metrics = df.groupby(['intervention', 'price']).apply(lambda group: pd.Series({
+        'ml_pred_mape': mean_absolute_percentage_error(group['ground_truth_sales'], group['ml_pred']),
+        'ml_pred_mse': mean_squared_error(group['ground_truth_sales'], group['ml_pred']),
+        'dml_lin_pred_mape': mean_absolute_percentage_error(group['ground_truth_sales'], group['dml_lin_pred']),
+        'dml_lin_pred_mse': mean_squared_error(group['ground_truth_sales'], group['dml_lin_pred']),
+        'dml_log_pred_mape': mean_absolute_percentage_error(group['ground_truth_sales'], group['dml_log_pred']),
+        'dml_log_pred_mse': mean_squared_error(group['ground_truth_sales'], group['dml_log_pred'])
+    }))
+    metrics.reset_index(inplace=True)
+    metrics['price_intervention'] = metrics['price'].astype(str) + ": " + metrics['intervention']
+    metrics.drop(columns=['intervention', 'price'], inplace=True)
+    metrics.sort_values(by='price_intervention', inplace=True)
+    return metrics
+
+
+def create_objective_function_DML(dataset, y_col, X_cols):
+    def objective(trial):
+        param = {
+            'objective': 'regression',
+            'metric': 'rmse',
+            'verbosity': -1,
+            'lambda_l1': trial.suggest_loguniform('lambda_l1', 1e-8, 10.0),
+            'num_leaves': trial.suggest_int('num_leaves', 2, 100),
+            'feature_fraction': trial.suggest_uniform('feature_fraction', 0.4, 1.0),
+            'bagging_fraction': trial.suggest_uniform('bagging_fraction', 0.4, 1.0),
+            'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 50),
+            'num_boost_round': trial.suggest_int('num_boost_round', 50, 500),
+            'learning_rate': trial.suggest_loguniform('learning_rate', 1e-4, 1e-1),
+            'max_depth': trial.suggest_int('max_depth', 2, 10),
+        }
+        
+        lgb_train = lgb.Dataset(dataset[X_cols], dataset[y_col])
+        cv_results = lgb.cv(param, lgb_train, nfold=3, metrics='rmse', seed=42, stratified=False)
+        
+        return np.mean(cv_results['valid rmse-mean'])
+    return objective
+
+def plot_metrics(df_metrics):
+    def plot_metric(metric):
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_metrics['price_intervention'].values, df_metrics[f'ml_pred_{metric}'].values, label=f'ML Model {str.upper(metric)}')
+        plt.plot(df_metrics['price_intervention'].values, df_metrics[f'dml_lin_pred_{metric}'].values, label=f'Linear DML {str.upper(metric)}')
+        plt.plot(df_metrics['price_intervention'].values, df_metrics[f'dml_log_pred_{metric}'].values, label=f'Log-Log DML {str.upper(metric)}')
+        plt.xlabel('Price Intervention')
+        plt.ylabel(str.upper(metric))
+        plt.title(f'{str.upper(metric)} for Different Models by Price Intervention')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+    plot_metric('mse')
+    plot_metric('mape')
