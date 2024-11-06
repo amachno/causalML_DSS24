@@ -11,7 +11,7 @@ import networkx as nx
 from utils import *
 
 ### 1) Import data
-PATH_DATA = "C:/Users/lukasz.frydrych/OneDrive - Lingaro Sp. z o. o/Desktop/projects/202410_DSSummit/repo/causalML_DSS24/data/"
+PATH_DATA = "C:/Users/artur.machno/git_repos/causalML_DSS24/data"
 
 df = pd.read_csv(f"{PATH_DATA}/data_clean.csv")
 

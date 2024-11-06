@@ -1,4 +1,6 @@
+
 ## Generate syntethic data based on actual data from Kaggle
+#%%
 import numpy as np
 import pandas as pd
 
@@ -10,9 +12,9 @@ from dowhy import gcm
 import networkx as nx
 
 from utils import *
-
+#%%
 ### 1) Import data
-PATH_DATA = "C:/Users/lukasz.frydrych/OneDrive - Lingaro Sp. z o. o/Desktop/projects/202410_DSSummit/repo/causalML_DSS24/data"
+PATH_DATA = "C:/Users/artur.machno/git_repos/causalML_DSS24/data"
 
 df_selected = pd.read_csv(f"{PATH_DATA}/sales_top_sku_selected.csv")
 df_store_cities = pd.read_csv(f"{PATH_DATA}/store_cities.csv")

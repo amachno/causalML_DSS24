@@ -1,0 +1,99 @@
+import lightgbm as lgb
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
+import doubleml as dml
+from sklearn.base import clone
+import pandas as pd
+# from manual_generation_class import DataGenerator
+
+# Generate the data
+# data_gen = DataGenerator(seed=42)
+# df = data_gen.generate_data()
+
+PATH_DATA = "C:/Users/artur.machno/git_repos/causalML_DSS24/data"
+
+df = pd.read_csv(f"{PATH_DATA}/df_synth_manual.csv")
+
+# Split data into training and testing sets
+train_df = df[df['date'] < '2021-01-01']  # Training data up to 2021
+test_df = df[df['date'] >= '2021-01-01']  # Testing data from 2022 onwards
+
+# Prepare features and target
+features = df.drop(columns=['sales', 'date']).columns.tolist()
+
+# Encode categorical variables
+train_df_encoded = pd.get_dummies(train_df, columns=['store_type'], drop_first=True)
+test_df_encoded = pd.get_dummies(test_df, columns=['store_type'], drop_first=True)
+
+# Ensure both datasets have the same columns
+missing_cols = set(train_df_encoded.columns) - set(test_df_encoded.columns)
+for col in missing_cols:
+    test_df_encoded[col] = 0
+test_df_encoded = test_df_encoded[train_df_encoded.columns]
+
+X_train = train_df_encoded[[feature for feature in features if feature != 'store_type'] + ['store_type_suburban', 'store_type_urban']]
+y_train = train_df_encoded['sales']
+
+X_test = test_df_encoded[[feature for feature in features if feature != 'store_type'] + ['store_type_suburban', 'store_type_urban']]
+y_test = test_df_encoded['sales']
+
+# Classical Model using LightGBM
+lgb_params = {
+    'objective': 'regression',
+    'metric': 'rmse',
+    'verbose': -1,
+    'random_state': 42
+}
+lgb_train = lgb.Dataset(X_train, y_train)
+lgbm_model = lgb.train(lgb_params, lgb_train, num_boost_round=100)
+
+# Predictions and performance
+y_pred_classical = lgbm_model.predict(X_test)
+mse_classical = mean_squared_error(y_test, y_pred_classical)
+mape_classical = mean_absolute_percentage_error(y_test, y_pred_classical)
+print(f"Classical Model - MSE: {mse_classical:.2f}, MAPE: {mape_classical:.2%}")
+
+# Double ML Model
+# Define the causal model
+# Y: sales, D: price, X: other covariates
+
+# Prepare data for DoubleML
+X = train_df_encoded.drop(columns=['sales', 'competitor_sales', 'date'])
+y = train_df_encoded['sales']
+d = train_df_encoded['price']
+
+# Features excluding the treatment variable
+X_vars = X.columns.tolist()
+X_vars.remove('price')
+
+# Initialize DoubleMLData object
+data = dml.DoubleMLData(train_df_encoded, y_col='sales', d_cols='price', x_cols=X_vars)
+
+# Set up learners
+learner = lgb.LGBMRegressor(random_state=42)
+ml_g = clone(learner)  # Outcome model
+ml_m = clone(learner)  # Treatment model
+ml_l = clone(learner)  # Learner for the causal effect
+
+# Initialize DoubleMLPLR (Partial Linear Regression)
+dml_plr = dml.DoubleMLPLR(data, ml_g=ml_g, ml_m=ml_m, ml_l=ml_l, n_folds=5)
+
+
+# Fit the Double ML model
+dml_plr.fit()
+
+# Retrieve the estimated causal effect of price on sales
+estimated_effect = dml_plr.coef
+print(f"Estimated causal effect of price on sales: {estimated_effect}")
+
+standard_error = dml_plr.se
+print(f"Standard error of the estimated effect: {standard_error}")
+
+# Predict using Double ML model
+
+ml_g.fit(X, y_train)
+y_pred_dml = ml_g.predict(test_df_encoded.drop(columns=['sales', 'competitor_sales', 'date']))
+
+mse_dml = mean_squared_error(y_test, y_pred_dml)
+mape_dml = mean_absolute_percentage_error(y_test, y_pred_dml)
+print(f"Double ML Model - MSE: {mse_dml:.2f}, MAPE: {mape_dml:.2%}")
