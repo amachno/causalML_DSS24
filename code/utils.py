@@ -191,13 +191,15 @@ def summarize_and_rank(df, grp_cols, get_elast_coefs=False):
     return df_summary
 
 
-def generate_test_dataset(scm_data_gen, intervention_dict, df_test):
+def generate_test_dataset(scm_data_gen, intervention_dict, df_test, verbose=True):
     df_test_c = dowhy.gcm.whatif.interventional_samples(scm_data_gen, intervention_dict, df_test)
-    print(f"Average sales: {df_test_c['sales'].mean()} for price: {df_test_c['price'].mean()}")
+    if verbose:
+        print(f"Average sales: {df_test_c['sales'].mean()} for price: {df_test_c['price'].mean()}")
     df_test_c['log_price'] = np.log(df_test_c['price'] + 1)  # Adding 1 to avoid log(0)
     df_test_c['log_sales'] = np.log(df_test_c['sales'] + 1)  # Adding 1 to avoid log(0)
-    plt.scatter(df_test_c['price'], df_test_c['sales'], color='blue')
-    plt.show()
+    if verbose:
+        plt.scatter(df_test_c['price'], df_test_c['sales'], color='blue')
+        plt.show()
     return df_test_c
 
 def change_store_type_type(df):
@@ -289,3 +291,18 @@ def plot_metrics(df_metrics):
         plt.show()
     plot_metric('mse')
     plot_metric('mape')
+
+def plot_residuals(df, ground_truth_col, pred_cols, titles):
+    fig, axes = plt.subplots(1, len(pred_cols), figsize=(18, 6))
+    
+    for i, pred_col in enumerate(pred_cols):
+        axes[i].scatter(df[ground_truth_col], df[ground_truth_col] - df[pred_col])
+        axes[i].axhline(y=0, color='r', linestyle='--')
+        axes[i].set_title(titles[i])
+        axes[i].set_xlabel('Ground Truth Sales')
+        axes[i].set_ylabel('Residuals')
+    
+    plt.tight_layout()
+    plt.show()
+
+    
