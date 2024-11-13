@@ -108,11 +108,14 @@ def create_objective_function_DML(dataset, y_col, X_cols):
     return objective
 
 
-def plot_metrics_ml_dml(df_metrics):
+def plot_metrics_ml_dml(df_metrics, test_data=False):
     def plot_metric(metric):
         plt.figure(figsize=(10, 6))
-        plt.plot(df_metrics['price_intervention'].values, df_metrics[f'ml_pred_{metric}'].values, label=f'ML Model {str.upper(metric)}')
-        plt.plot(df_metrics['price_intervention'].values, df_metrics[f'dml_pred_{metric}'].values, label=f'DML Model {str.upper(metric)}')
+        plt.plot(df_metrics['price_intervention'].values, df_metrics[f'ml_pred_{metric}'].values, color='blue', label=f'ML Model {str.upper(metric)}')
+        plt.plot(df_metrics['price_intervention'].values, df_metrics[f'dml_pred_{metric}'].values, color='green', label=f'DML Model {str.upper(metric)}')
+        if test_data:
+            plt.plot(df_metrics['price_intervention'].values, df_metrics[f'ml_test_{metric}'].values, color='blue', label=f'ML Model on Test {str.upper(metric)}', linestyle='--')
+            plt.plot(df_metrics['price_intervention'].values, df_metrics[f'dml_test_{metric}'].values, color='green', label=f'DML Model on Test {str.upper(metric)}', linestyle='--')
         plt.xlabel('Price Intervention')
         plt.ylabel(str.upper(metric))
         plt.title(f'{str.upper(metric)} for Different Models by Price Intervention')
@@ -145,10 +148,10 @@ def predict_log_dml(model, df_pred, X_cols, log_price_baseline_col='log_price'):
     return np.exp(df_tmp['dml_pred_log']) - 1
 
 
-def get_optimal_price_ml(df, ml_model, X_cols_price, sku_unit_cost):
+def get_optimal_price_ml(df, ml_model, X_cols_price, sku_unit_cost, list_prices):
     df_tmp = df.copy()
     dict_margins = {}
-    for price_point in np.sort(df_tmp['price'].unique()):
+    for price_point in list_prices:
         df_tmp['price'] = price_point
         df_tmp['unit_cost'] = sku_unit_cost
         df_tmp['predicted_sales'] = ml_model.predict(df_tmp[X_cols_price])
@@ -158,10 +161,10 @@ def get_optimal_price_ml(df, ml_model, X_cols_price, sku_unit_cost):
     return optimal_price
 
 
-def get_optimal_price_log_dml(df, causal_model_log, sku_unit_cost, X_cols):
+def get_optimal_price_log_dml(df, causal_model_log, sku_unit_cost, X_cols, list_prices):
     df_tmp = df.copy()
     dict_margins = {}
-    for price_point in np.sort(df_tmp['price'].unique()):
+    for price_point in list_prices:
         df_tmp['price'] = price_point
         df_tmp['unit_cost'] = sku_unit_cost
         df_tmp['log_price_intervention'] = np.log(df_tmp['price'] + 1)
@@ -185,14 +188,14 @@ def apply_optimal_price(df, optimal_price, sku_unit_cost, scm_data_generator):
     return margin_sum, sales_sum
 
 
-def print_decision_intelligence_results(df):
+def print_decision_intelligence_results(df, n_bins=30):
     df_results_margin = df.copy()
 
     df_results_margin[['margin_sum', 'margin_sum_log_dml']] = (df_results_margin[['margin_sum', 'margin_sum_log_dml']] / 10000).round().astype(int)
     df_results_margin[['sales_sum', 'sales_sum_log_dml']] = (df_results_margin[['sales_sum', 'sales_sum_log_dml']] / 1000).round().astype(int)
 
-    plt.hist(df_results_margin['margin_sum'], bins=30, alpha=0.5, label='ML Model')
-    plt.hist(df_results_margin['margin_sum_log_dml'], bins=30, alpha=0.5, label='Log DML Model')
+    plt.hist(df_results_margin['margin_sum'], bins=n_bins, alpha=0.5, label='ML Model')
+    plt.hist(df_results_margin['margin_sum_log_dml'], bins=n_bins, alpha=0.5, label='Log DML Model')
     plt.xlabel('Margin Sum')
     plt.ylabel('Frequency')
     plt.legend(loc='upper right')
